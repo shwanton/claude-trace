@@ -1,8 +1,8 @@
 import fs from "fs";
 import path from "path";
-import { spawn } from "child_process";
 import { RawPair } from "./types";
 import { HTMLGenerator } from "./html-generator";
+import { openInBrowser as openBrowser, getBrowserDescription, BrowserName } from "./browser-utils";
 
 export interface InterceptorConfig {
 	logDirectory?: string;
@@ -52,6 +52,29 @@ export class ClaudeTrafficLogger {
 		console.log(`Logs will be written to:`);
 		console.log(`  JSONL: ${path.resolve(this.logFile)}`);
 		console.log(`  HTML:  ${path.resolve(this.htmlFile)}`);
+
+		// Handle open-on-start: generate initial HTML and open browser immediately
+		const shouldOpenOnStart = process.env.CLAUDE_TRACE_OPEN_ON_START === "true";
+		if (shouldOpenOnStart) {
+			this.openBrowserOnStart();
+		}
+	}
+
+	private async openBrowserOnStart(): Promise<void> {
+		try {
+			// Generate initial empty HTML so the browser has something to display
+			await this.generateHTML();
+
+			const browser = (process.env.CLAUDE_TRACE_BROWSER || "default") as BrowserName;
+			const success = openBrowser(this.htmlFile, browser);
+			if (success) {
+				console.log(`Opening ${this.htmlFile} in ${getBrowserDescription(browser)} (will auto-refresh as data arrives)`);
+			} else {
+				console.log(`Failed to open browser automatically`);
+			}
+		} catch (error) {
+			console.log(`Failed to open browser on start: ${error}`);
+		}
 	}
 
 	private isClaudeAPI(url: string | URL): boolean {
@@ -449,14 +472,18 @@ export class ClaudeTrafficLogger {
 		this.pendingRequests.clear();
 		console.log(`Cleanup complete. Logged ${this.pairs.length} pairs`);
 
-		// Open browser if requested
+		// Open browser if requested (and not already opened on start)
 		const shouldOpenBrowser = process.env.CLAUDE_TRACE_OPEN_BROWSER === "true";
-		if (shouldOpenBrowser && fs.existsSync(this.htmlFile)) {
-			try {
-				spawn("open", [this.htmlFile], { detached: true, stdio: "ignore" }).unref();
-				console.log(`Opening ${this.htmlFile} in browser`);
-			} catch (error) {
-				console.log(`Failed to open browser: ${error}`);
+		const openedOnStart = process.env.CLAUDE_TRACE_OPEN_ON_START === "true";
+
+		// Only open at cleanup if we didn't already open on start
+		if (shouldOpenBrowser && !openedOnStart && fs.existsSync(this.htmlFile)) {
+			const browser = (process.env.CLAUDE_TRACE_BROWSER || "default") as BrowserName;
+			const success = openBrowser(this.htmlFile, browser);
+			if (success) {
+				console.log(`Opening ${this.htmlFile} in ${getBrowserDescription(browser)}`);
+			} else {
+				console.log(`Failed to open browser`);
 			}
 		}
 	}

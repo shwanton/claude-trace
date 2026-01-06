@@ -4,6 +4,7 @@ import { spawn, ChildProcess } from "child_process";
 import * as path from "path";
 import * as fs from "fs";
 import { HTMLGenerator } from "./html-generator";
+import { openInBrowser, getBrowserDescription, BrowserName } from "./browser-utils";
 
 // Colors for output
 export const colors = {
@@ -35,6 +36,8 @@ ${colors.yellow}OPTIONS:${colors.reset}
   --run-with         Pass all following arguments to Claude process
   --include-all-requests Include all requests made through fetch, otherwise only requests to v1/messages with more than 2 messages in the context
   --no-open          Don't open generated HTML file in browser
+  --open-on-start    Open HTML viewer immediately when trace session starts
+  --browser NAME     Specify browser to use (default, chrome, firefox, safari, edge, brave, arc, or path)
   --log              Specify custom log file base name (without extension)
   --claude-path      Specify custom path to Claude binary
   --help, -h         Show this help message
@@ -91,6 +94,14 @@ ${colors.yellow}EXAMPLES:${colors.reset}
 
   # Use custom Claude binary path
   claude-trace --claude-path /usr/local/bin/claude
+
+  # Open trace viewer immediately when session starts
+  claude-trace --open-on-start
+
+  # Use a specific browser
+  claude-trace --browser chrome
+  claude-trace --browser firefox
+  claude-trace --browser /usr/bin/custom-browser
 
 ${colors.yellow}OUTPUT:${colors.reset}
   Logs are saved to: ${colors.green}.claude-trace/log-YYYY-MM-DD-HH-MM-SS.{jsonl,html}${colors.reset}
@@ -231,9 +242,11 @@ function getLoaderPath(): string {
 async function runClaudeWithInterception(
 	claudeArgs: string[] = [],
 	includeAllRequests: boolean = false,
-	openInBrowser: boolean = false,
+	shouldOpenInBrowser: boolean = false,
 	customClaudePath?: string,
 	logBaseName?: string,
+	openOnStart: boolean = false,
+	browser: BrowserName = "default",
 ): Promise<void> {
 	log("Claude Trace", "blue");
 	log("Starting Claude with traffic logging", "yellow");
@@ -256,7 +269,9 @@ async function runClaudeWithInterception(
 			...process.env,
 			NODE_OPTIONS: "--no-deprecation",
 			CLAUDE_TRACE_INCLUDE_ALL_REQUESTS: includeAllRequests ? "true" : "false",
-			CLAUDE_TRACE_OPEN_BROWSER: openInBrowser ? "true" : "false",
+			CLAUDE_TRACE_OPEN_BROWSER: shouldOpenInBrowser ? "true" : "false",
+			CLAUDE_TRACE_OPEN_ON_START: openOnStart ? "true" : "false",
+			CLAUDE_TRACE_BROWSER: browser || "default",
 			...(logBaseName ? { CLAUDE_TRACE_LOG_NAME: logBaseName } : {}),
 		},
 		stdio: "inherit",
@@ -411,15 +426,20 @@ async function generateHTMLFromCLI(
 	inputFile: string,
 	outputFile?: string,
 	includeAllRequests: boolean = false,
-	openInBrowser: boolean = false,
+	shouldOpen: boolean = false,
+	browser: BrowserName = "default",
 ): Promise<void> {
 	try {
 		const htmlGenerator = new HTMLGenerator();
 		const finalOutputFile = await htmlGenerator.generateHTMLFromJSONL(inputFile, outputFile, includeAllRequests);
 
-		if (openInBrowser) {
-			spawn("open", [finalOutputFile], { detached: true, stdio: "ignore" }).unref();
-			log(`Opening ${finalOutputFile} in browser`, "green");
+		if (shouldOpen) {
+			const success = openInBrowser(finalOutputFile, browser);
+			if (success) {
+				log(`Opening ${finalOutputFile} in ${getBrowserDescription(browser)}`, "green");
+			} else {
+				log(`Failed to open ${finalOutputFile} in browser`, "red");
+			}
 		}
 
 		process.exit(0);
@@ -487,6 +507,16 @@ async function main(): Promise<void> {
 		logBaseName = claudeTraceArgs[logIndex + 1];
 	}
 
+	// Check for open-on-start flag
+	const openOnStart = claudeTraceArgs.includes("--open-on-start");
+
+	// Check for browser option
+	let browser: BrowserName = "default";
+	const browserIndex = claudeTraceArgs.indexOf("--browser");
+	if (browserIndex !== -1 && claudeTraceArgs[browserIndex + 1]) {
+		browser = claudeTraceArgs[browserIndex + 1];
+	}
+
 	// Scenario 2: --extract-token
 	if (claudeTraceArgs.includes("--extract-token")) {
 		await extractToken(customClaudePath);
@@ -514,7 +544,7 @@ async function main(): Promise<void> {
 			process.exit(1);
 		}
 
-		await generateHTMLFromCLI(inputFile, outputFile, includeAllRequests, openInBrowser);
+		await generateHTMLFromCLI(inputFile, outputFile, includeAllRequests, openInBrowser, browser);
 		return;
 	}
 
@@ -525,7 +555,7 @@ async function main(): Promise<void> {
 	}
 
 	// Scenario 1: No args (or claude with args) -> launch claude with interception
-	await runClaudeWithInterception(claudeArgs, includeAllRequests, openInBrowser, customClaudePath, logBaseName);
+	await runClaudeWithInterception(claudeArgs, includeAllRequests, openInBrowser, customClaudePath, logBaseName, openOnStart, browser);
 }
 
 main().catch((error) => {
