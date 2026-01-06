@@ -26,22 +26,23 @@ function getBrowserConfig(browser: BrowserName, filePath: string): BrowserConfig
 	const browserLower = browser?.toLowerCase() || "default";
 
 	if (platform === "darwin") {
-		// macOS
+		// macOS - use -g flag to open in background without stealing focus
+		// Note: Chrome and Chromium-based browsers may still steal focus
 		switch (browserLower) {
 			case "chrome":
-				return { command: "open", args: ["-a", "Google Chrome", filePath] };
+				return { command: "open", args: ["-g", "-a", "Google Chrome", filePath] };
 			case "firefox":
-				return { command: "open", args: ["-a", "Firefox", filePath] };
+				return { command: "open", args: ["-g", "-a", "Firefox", filePath] };
 			case "safari":
-				return { command: "open", args: ["-a", "Safari", filePath] };
+				return { command: "open", args: ["-g", "-a", "Safari", filePath] };
 			case "edge":
-				return { command: "open", args: ["-a", "Microsoft Edge", filePath] };
+				return { command: "open", args: ["-g", "-a", "Microsoft Edge", filePath] };
 			case "brave":
-				return { command: "open", args: ["-a", "Brave Browser", filePath] };
+				return { command: "open", args: ["-g", "-a", "Brave Browser", filePath] };
 			case "arc":
-				return { command: "open", args: ["-a", "Arc", filePath] };
+				return { command: "open", args: ["-g", "-a", "Arc", filePath] };
 			default:
-				return { command: "open", args: [filePath] };
+				return { command: "open", args: ["-g", filePath] };
 		}
 	} else if (platform === "win32") {
 		// Windows
